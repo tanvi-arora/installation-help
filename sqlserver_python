@@ -1,0 +1,126 @@
+###################################
+# Below steps were implemented on gcloud shell but should be helpful in installing on any linux/unix based servers
+# This is a combined effort with my MS project group member Mahesh Kuklani 
+# ################################
+# server - gcloud shell ( Debian server )
+
+# update basic components. On AWS , it is yum install update
+gcloud components update
+
+#  Installing openssl-devel alone seems to result in SSL errors in pip (see https://medium.com/@moreless/pip-complains-there-is-no-ssl-support-in-python-edbdce548852)
+# Need to install OpenSSL also to avoid these errors
+sudo su
+wget https://github.com/openssl/openssl/archive/OpenSSL_1_0_2l.tar.gz
+exit
+
+tar -zxvf OpenSSL_1_0_2l.tar.gz 
+cd openssl-OpenSSL_1_0_2l/
+./config shared
+make
+sudo make install
+export LD_LIBRARY_PATH=/usr/local/ssl/lib/
+
+cd ..
+rm OpenSSL_1_0_2l.tar.gz
+rm -rf openssl-OpenSSL_1_0_2l/
+
+#  Install Python 3.6
+sudo su
+wget https://www.python.org/ftp/python/3.6.0/Python-3.6.0.tar.xz
+exit
+
+tar xJf Python-3.6.0.tar.xz
+cd Python-3.6.0
+./configure 
+make
+sudo make install
+
+cd ..
+rm Python-3.6.0
+sudo rm -rf Python-3.6.0
+
+# Install pip
+sudo su
+# most of python installations come with pip, if upgrade step fails, run get command
+#(optional)    python3 get-pip.py --user
+sudo /usr/local/bin/pip install --upgrade virtualenv
+
+virtualenv -p python3 SQLServer
+source SQLServer/bin/activate
+
+# Install unixODBC as this is requirement for msodbcsql
+# Then, download ODBC source code, compile and take the output
+sudo su
+curl ftp://ftp.unixodbc.org/pub/unixODBC/unixODBC-2.3.5.tar.gz -O
+exit
+tar xvzf unixODBC-2.3.5.tar.gz
+cd unixODBC-2.3.5
+
+# Install odbc in local drive i.e. /home directory
+sudo ./configure  --sysconfdir=/var/task  --disable-gui --disable-drivers --enable-iconv --with-iconv-char-enc=UTF8 --with-iconv-ucode-enc=UTF16LE --prefix=/home
+sudo mkdir /var/task
+sudo touch /var/task/odbcinst.ini
+sudo touch /var/task/odbc.ini
+sudo make install
+
+# Copy the contents of the directory in a directory from where zip file will be created.
+cd ..
+mv unixODBC-2.3.5 unixODBC-2.3.5.tar.gz /tmp/
+
+#  Install MSsql odbc driver
+Sudo su
+curl https://packages.microsoft.com/config/debian/9/prod.list > /etc/apt/sources.list.d/mssql-release.list
+exit
+sudo apt-get update
+sudo ACCEPT_EULA=Y apt-get install msodbcsql17
+export CFLAGS="-I/var/task/include"
+export LDFLAGS="-L/var/task/lib"
+
+#  check for required *.ini files for odbc driver
+
+odbcinst -j
+
+returns output as below –
+unixODBC 2.3.4
+DRIVERS............: /etc/odbcinst.ini
+SYSTEM DATA SOURCES: /etc/odbc.ini
+FILE DATA SOURCES..: /etc/ODBCDataSources
+USER DATA SOURCES..: /home/<USER>/.odbc.ini
+SQLULEN Size.......: 8
+SQLLEN Size........: 8
+SQLSETPOSIROW Size.: 8
+
+## 7) Create odbc.ini file based on driver information in odbcinst.ini
+
+cat <<EOF > /etc/odbc.ini
+[ODBC Driver 17 for SQL Server]
+Driver      = ODBC Driver 17 for SQL Server
+Description = My ODBC Driver 17 for SQL Server
+Trace       = No
+EOF
+
+#  copy msodbcsql to /home/<USER> directory
+cp -r /opt/microsoft/msodbcsql .
+cp  /etc/odbcinst.ini /var/task/
+cp /etc/odbcinst.ini /home/<USER>
+cp /etc/odbc.ini /home/<USER>
+
+# Install pyodbc for python
+sudo apt-get install unixodbc-dev
+pip install pyodbc -t .
+#if pyodbc is already available, then upgrade it using below step
+pip install pyodbc --upgrade -t .
+
+
+# Set up server level firewall settings on SQL Server to allow traffic to/from your server
+
+
+## 10) Update server side firewall setttings on master db
+exec sp_set_firewall_rule N'Allow Azure', 'XX.XX.XX.XX','XX.XX.XX.XX';
+
+#### 11) Test connectivity
+## Driver name is same name from odbc.ini file
+python3 -c 'import pyodbc;conn = pyodbc.connect("DRIVER={ODBC Driver 17 for SQL Server};SERVER=<SERVER_NAME>;Database=<DB_NAME>;Uid=<USER_ID>;Pwd=<PWD>");crsr = conn.cursor();rows = crsr.execute("select @@VERSION").fetchall();print(rows);crsr.close();conn.close()'
+
+
+
